@@ -26,6 +26,8 @@ class AnimatedMeshGradient extends StatefulWidget {
     this.child,
     this.controller,
     this.seed,
+    this.initialPhase,
+    this.onPhaseUpdate,
   });
 
   /// Define 4 colors which will be used to create an animated gradient.
@@ -41,6 +43,14 @@ class AnimatedMeshGradient extends StatefulWidget {
   /// Can be used to start / stop the animation manually. Will be ignored if [seed] is set.
   final AnimatedMeshGradientController? controller;
 
+  /// When non-null, the animation starts from this phase (e.g. to resume from a
+  /// previously saved state). Ignored if [seed] is set.
+  final double? initialPhase;
+
+  /// Called each tick with the current animation phase. Use to save phase for
+  /// pausing (e.g. show a static gradient at this phase when closed).
+  final void Function(double phase)? onPhaseUpdate;
+
   /// The child widget to display on top of the gradient.
   final Widget? child;
 
@@ -55,8 +65,12 @@ class _AnimatedMeshGradientState extends State<AnimatedMeshGradient> {
 
   Ticker? _ticker;
 
+  /// Stored so we can remove it in [dispose]. Avoids stale listener after
+  /// widget is disposed (e.g. when list item is replaced by overlay placeholder).
+  VoidCallback? _controllerListener;
+
   /// The current time value used to control the animation phase.
-  late double _delta = widget.seed ?? 0;
+  late double _delta = widget.seed ?? widget.initialPhase ?? 0;
 
   /// Recursively updates the animation time and triggers a repaint.
   ///
@@ -74,6 +88,7 @@ class _AnimatedMeshGradientState extends State<AnimatedMeshGradient> {
     setState(() {
       _delta += 0.01;
     });
+    widget.onPhaseUpdate?.call(_delta);
   }
 
   @override
@@ -101,36 +116,59 @@ class _AnimatedMeshGradientState extends State<AnimatedMeshGradient> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-      // Define the ticker because we are certain it will be used next
-      _ticker = Ticker(_tickerCallback);
+      if (!mounted) return;
+      _initTicker();
+    });
+  }
 
-      // Start the animation to account for isAnimating already being true at init
-      if (widget.controller == null || widget.controller!.isAnimating.value) {
-        _ticker!.start();
-      }
+  void _initTicker() {
+    final VoidCallback? oldListener = _controllerListener;
+    final AnimatedMeshGradientController? c = widget.controller;
+    if (oldListener != null && c != null) {
+      c.isAnimating.removeListener(oldListener);
+      _controllerListener = null;
+    }
 
-      // Make sure there is no listener added when controller is null
-      if (widget.controller == null) {
+    _ticker?.dispose();
+    _ticker = Ticker(_tickerCallback);
+
+    // Start the animation to account for isAnimating already being true at init
+    if (c == null || c.isAnimating.value) {
+      _ticker!.start();
+    }
+
+    if (c == null) return;
+
+    void onControllerChange() {
+      if (!mounted) return;
+      final Ticker? t = _ticker;
+      if (t == null) return;
+      if (widget.controller!.isAnimating.value) {
+        if (!t.isActive) {
+          // Flutter's Ticker cannot be restarted after stop(); create a new one.
+          _initTicker();
+        }
         return;
       }
+      if (t.isActive) {
+        t.stop();
+      }
+    }
 
-      // Register a listener callback for controller.isAnimating changes
-      widget.controller!.isAnimating.addListener(() {
-        if (widget.controller!.isAnimating.value && !_ticker!.isActive) {
-          _ticker!.start();
-          return;
-        }
-
-        if (!widget.controller!.isAnimating.value && _ticker!.isActive) {
-          _ticker!.stop();
-        }
-      });
-    });
+    _controllerListener = onControllerChange;
+    c.isAnimating.addListener(_controllerListener!);
   }
 
   @override
   void dispose() {
+    final VoidCallback? listener = _controllerListener;
+    final AnimatedMeshGradientController? c = widget.controller;
+    if (listener != null && c != null) {
+      c.isAnimating.removeListener(listener);
+      _controllerListener = null;
+    }
     _ticker?.dispose();
+    _ticker = null;
     super.dispose();
   }
 
