@@ -26,6 +26,8 @@ class AnimatedMeshGradient extends StatefulWidget {
     this.child,
     this.controller,
     this.seed,
+    this.initialPhase,
+    this.onPhaseUpdate,
   });
 
   /// Define 4 colors which will be used to create an animated gradient.
@@ -40,6 +42,14 @@ class AnimatedMeshGradient extends StatefulWidget {
 
   /// Can be used to start / stop the animation manually. Will be ignored if [seed] is set.
   final AnimatedMeshGradientController? controller;
+
+  /// When non-null, the animation starts from this phase (e.g. to resume from a
+  /// previously saved state). Ignored if [seed] is set.
+  final double? initialPhase;
+
+  /// Called each tick with the current animation phase. Use to save phase for
+  /// pausing (e.g. show a static gradient at this phase when closed).
+  final void Function(double phase)? onPhaseUpdate;
 
   /// The child widget to display on top of the gradient.
   final Widget? child;
@@ -60,7 +70,7 @@ class _AnimatedMeshGradientState extends State<AnimatedMeshGradient> {
   VoidCallback? _controllerListener;
 
   /// The current time value used to control the animation phase.
-  late double _delta = widget.seed ?? 0;
+  late double _delta = widget.seed ?? widget.initialPhase ?? 0;
 
   /// Recursively updates the animation time and triggers a repaint.
   ///
@@ -78,6 +88,7 @@ class _AnimatedMeshGradientState extends State<AnimatedMeshGradient> {
     setState(() {
       _delta += 0.01;
     });
+    widget.onPhaseUpdate?.call(_delta);
   }
 
   @override
